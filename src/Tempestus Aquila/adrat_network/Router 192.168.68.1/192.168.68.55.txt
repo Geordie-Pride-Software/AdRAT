@@ -1,5 +1,0 @@
-IP:       192.168.68.55
-MAC:      04:7c:16:8a:53:49
-Hostname: unknown
-Role:     device
-Network:  192.168.68.0/22

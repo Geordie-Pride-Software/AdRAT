@@ -1,0 +1,5 @@
+IP:       10.50.40.1
+MAC:      unknown
+Hostname: unknown
+Role:     top router, your gateway
+Network:  10.50.40.0/21

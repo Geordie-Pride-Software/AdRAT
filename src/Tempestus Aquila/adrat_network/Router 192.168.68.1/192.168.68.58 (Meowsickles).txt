@@ -1,5 +1,0 @@
-IP:       192.168.68.58
-MAC:      80:b6:55:f0:ef:dd
-Hostname: Meowsickles
-Role:     this machine
-Network:  192.168.68.0/22
