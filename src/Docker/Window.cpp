@@ -1,4 +1,7 @@
 #include "Window.hpp"
+#include "Template/WindowTemplate.hpp"
+
+#include <algorithm>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -8,8 +11,9 @@
 #endif
 
 namespace {
-// Button actions, encoded into panel callback ids as (panelIndex * 10 + action)
-enum { ACT_FLOAT = 0, ACT_LEFT, ACT_RIGHT, ACT_BOTTOM, ACT_CLOSE };
+constexpr int SPLITTER_THICKNESS = 6;
+constexpr int MIN_VIEWPORT_SIZE = 120;
+constexpr int MIN_DOCK_SIZE = 120;
 
 #ifdef _WIN32
 constexpr UINT MENU_COMMAND_BASE = 0x4000;
@@ -190,11 +194,14 @@ void Docker::rebuildNativeMenu()
 
 // ------------------------------------------------------------- panel logic
 
-int Docker::addPanel(const std::string& title, ContentFn content)
+int Docker::addPanel(const std::string& title, ContentFn content, bool dockable,
+    WindowTemplateFn windowTemplate)
 {
     Panel p;
     p.title   = title;
     p.content = std::move(content);
+    p.windowTemplate = windowTemplate;
+    p.dockable = dockable;
     panels_.push_back(std::move(p));
     return static_cast<int>(panels_.size()) - 1;
 }
@@ -203,6 +210,9 @@ void Docker::buildPanel(int index, DockState where)
 {
     Panel& p = panels_[index];
     GLUI* g;
+
+    if (!p.dockable)
+        where = FLOATING;
 
     if (where == FLOATING) {
         g = GLUI_Master.create_glui(p.title.c_str(), 0, 120 + index * 40, 120 + index * 40);
@@ -225,19 +235,37 @@ void Docker::buildPanel(int index, DockState where)
     if (p.content)
         p.content(g, body);
 
-    // Docking controls, leaving out the state the panel is already in.
-    // This is the only "close" for a docked panel, since a docked subwindow
-    // has no native close button of its own to worry about.
-    const int base = index * 10;
-    GLUI_Panel* win = g->add_panel("Window");
-    if (where != FLOATING)    g->add_button_to_panel(win, "Float",       base + ACT_FLOAT,  Docker::panelCb);
-    if (where != DOCK_LEFT)   g->add_button_to_panel(win, "Dock left",   base + ACT_LEFT,   Docker::panelCb);
-    if (where != DOCK_RIGHT)  g->add_button_to_panel(win, "Dock right",  base + ACT_RIGHT,  Docker::panelCb);
-    if (where != DOCK_BOTTOM) g->add_button_to_panel(win, "Dock bottom", base + ACT_BOTTOM, Docker::panelCb);
-    g->add_button_to_panel(win, "Close", base + ACT_CLOSE, Docker::panelCb);
+    const WindowTemplateFn addWindowControls = p.windowTemplate
+        ? p.windowTemplate
+        : DockerTemplate::addWindowControls;
+    addWindowControls(g, index, where, p.dockable, Docker::panelCb);
+
+    if (where == DOCK_LEFT || where == DOCK_RIGHT) {
+        if (p.dockWidth > 0) {
+            g->set_subwindow_width(p.dockWidth);
+        } else {
+            const int previous = glutGetWindow();
+            glutSetWindow(g->get_glut_window_id());
+            p.dockWidth = glutGet(GLUT_WINDOW_WIDTH);
+            if (previous > 0)
+                glutSetWindow(previous);
+        }
+    } else if (where == DOCK_BOTTOM) {
+        if (p.dockHeight > 0) {
+            g->set_subwindow_height(p.dockHeight);
+        } else {
+            const int previous = glutGetWindow();
+            glutSetWindow(g->get_glut_window_id());
+            p.dockHeight = glutGet(GLUT_WINDOW_HEIGHT);
+            if (previous > 0)
+                glutSetWindow(previous);
+        }
+    }
 
     p.glui  = g;
     p.state = where;
+    if (where == DOCK_LEFT || where == DOCK_RIGHT || where == DOCK_BOTTOM)
+        createSplitter(index);
 }
 
 // Changes are applied from a GLUT timer so that a panel is never destroyed
@@ -257,6 +285,7 @@ void Docker::applyPending()
         if (!p.hasPending) continue;
         p.hasPending = false;
 
+        destroySplitter(p);
         if (p.glui) {
             closeHandlers_.erase(p.glui->get_glut_window_id());
             p.glui->close();
@@ -326,7 +355,134 @@ void Docker::handleReshape()
 
     if (onViewport_)
         onViewport_(x, y, w, h);
+    updateSplitters();
     glutPostRedisplay();
+}
+
+void Docker::createSplitter(int index)
+{
+    Panel& panel = panels_[index];
+    if (panel.splitterWindow || panel.state == FLOATING || panel.state == CLOSED)
+        return;
+
+    const int previous = glutGetWindow();
+    glutSetWindow(mainWindow_);
+    panel.splitterWindow = glutCreateSubWindow(mainWindow_, 0, 0,
+        SPLITTER_THICKNESS, SPLITTER_THICKNESS);
+    splitterPanels_[panel.splitterWindow] = index;
+
+    glutDisplayFunc(Docker::splitterDisplayCb);
+    glutMouseFunc(Docker::splitterMouseCb);
+    glutMotionFunc(Docker::splitterMotionCb);
+    glutSetCursor(panel.state == DOCK_BOTTOM
+        ? GLUT_CURSOR_UP_DOWN : GLUT_CURSOR_LEFT_RIGHT);
+
+    if (previous > 0)
+        glutSetWindow(previous);
+    updateSplitters();
+}
+
+void Docker::destroySplitter(Panel& panel)
+{
+    if (!panel.splitterWindow)
+        return;
+
+    const int splitterWindow = panel.splitterWindow;
+    const int previous = glutGetWindow();
+    const auto owner = splitterPanels_.find(splitterWindow);
+    if (owner != splitterPanels_.end() && draggingPanel_ == owner->second)
+        draggingPanel_ = -1;
+    splitterPanels_.erase(splitterWindow);
+    panel.splitterWindow = 0;
+
+    glutSetWindow(splitterWindow);
+    glutDestroyWindow(splitterWindow);
+    if (previous > 0 && previous != splitterWindow)
+        glutSetWindow(previous);
+}
+
+void Docker::updateSplitters()
+{
+    const int previous = glutGetWindow();
+    for (Panel& panel : panels_) {
+        if (!panel.splitterWindow || !panel.glui)
+            continue;
+
+        glutSetWindow(panel.glui->get_glut_window_id());
+        const int panelX = glutGet(GLUT_WINDOW_X);
+        const int panelY = glutGet(GLUT_WINDOW_Y);
+        const int panelWidth = glutGet(GLUT_WINDOW_WIDTH);
+        const int panelHeight = glutGet(GLUT_WINDOW_HEIGHT);
+
+        int splitterX = panelX;
+        int splitterY = panelY;
+        int splitterWidth = SPLITTER_THICKNESS;
+        int splitterHeight = panelHeight;
+        if (panel.state == DOCK_LEFT) {
+            splitterX = panelX + panelWidth - SPLITTER_THICKNESS / 2;
+        } else if (panel.state == DOCK_RIGHT) {
+            splitterX = panelX - SPLITTER_THICKNESS / 2;
+        } else {
+            splitterY = panelY - SPLITTER_THICKNESS / 2;
+            splitterWidth = panelWidth;
+            splitterHeight = SPLITTER_THICKNESS;
+        }
+
+        glutSetWindow(panel.splitterWindow);
+        glutPositionWindow(splitterX, splitterY);
+        glutReshapeWindow(splitterWidth, splitterHeight);
+        glutPopWindow();
+    }
+    if (previous > 0)
+        glutSetWindow(previous);
+}
+
+void Docker::resizeDockedPanel(int index, int pointerX, int pointerY)
+{
+    if (index < 0 || index >= static_cast<int>(panels_.size()))
+        return;
+
+    Panel& panel = panels_[index];
+    if (!panel.glui || panel.state == FLOATING || panel.state == CLOSED)
+        return;
+
+    const int pointerCoordinate = panel.state == DOCK_BOTTOM ? pointerY : pointerX;
+    const int delta = panel.state == DOCK_LEFT
+        ? pointerCoordinate - dragOriginCoordinate_
+        : dragOriginCoordinate_ - pointerCoordinate;
+    const bool horizontalDock = panel.state == DOCK_LEFT || panel.state == DOCK_RIGHT;
+
+    const int previous = glutGetWindow();
+    glutSetWindow(mainWindow_);
+    const int availableSize = glutGet(horizontalDock ? GLUT_WINDOW_WIDTH : GLUT_WINDOW_HEIGHT);
+    if (previous > 0)
+        glutSetWindow(previous);
+
+    int otherPanelsSize = 0;
+    for (size_t i = 0; i < panels_.size(); ++i) {
+        if (static_cast<int>(i) == index)
+            continue;
+        const Panel& other = panels_[i];
+        if (horizontalDock && (other.state == DOCK_LEFT || other.state == DOCK_RIGHT))
+            otherPanelsSize += other.dockWidth;
+        else if (!horizontalDock && other.state == DOCK_BOTTOM)
+            otherPanelsSize += other.dockHeight;
+    }
+
+    const int maximumSize = std::max(MIN_DOCK_SIZE,
+        availableSize - otherPanelsSize - MIN_VIEWPORT_SIZE);
+    const int minimumSize = std::min(MIN_DOCK_SIZE, maximumSize);
+    const int dockSize = std::clamp(dragStartSize_ + delta, minimumSize, maximumSize);
+
+    if (panel.state == DOCK_BOTTOM) {
+        panel.dockHeight = dockSize;
+        panel.glui->set_subwindow_height(dockSize);
+    } else {
+        panel.dockWidth = dockSize;
+        panel.glui->set_subwindow_width(dockSize);
+    }
+
+    relayout();
 }
 
 // Re-run layout after a subwindow was added or removed
@@ -346,11 +502,11 @@ void Docker::panelCb(int id)
     const int action = id % 10;
 
     switch (action) {
-        case ACT_FLOAT:  d.requestChange(index, FLOATING);    break;
-        case ACT_LEFT:   d.requestChange(index, DOCK_LEFT);   break;
-        case ACT_RIGHT:  d.requestChange(index, DOCK_RIGHT);  break;
-        case ACT_BOTTOM: d.requestChange(index, DOCK_BOTTOM); break;
-        case ACT_CLOSE:  d.requestChange(index, CLOSED);      break;
+        case DockerTemplate::ACT_FLOAT:  d.requestChange(index, FLOATING);    break;
+        case DockerTemplate::ACT_LEFT:   d.requestChange(index, DOCK_LEFT);   break;
+        case DockerTemplate::ACT_RIGHT:  d.requestChange(index, DOCK_RIGHT);  break;
+        case DockerTemplate::ACT_BOTTOM: d.requestChange(index, DOCK_BOTTOM); break;
+        case DockerTemplate::ACT_CLOSE:  d.requestChange(index, CLOSED);      break;
     }
 }
 
@@ -362,4 +518,46 @@ void Docker::timerCb(int)
 void Docker::reshapeCb(int, int)
 {
     instance().handleReshape();
+}
+
+void Docker::splitterDisplayCb()
+{
+    glClearColor(0.42f, 0.44f, 0.47f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glutSwapBuffers();
+}
+
+void Docker::splitterMouseCb(int button, int state, int x, int y)
+{
+    if (button != GLUT_LEFT_BUTTON)
+        return;
+
+    Docker& docker = instance();
+    const auto owner = docker.splitterPanels_.find(glutGetWindow());
+    if (owner == docker.splitterPanels_.end())
+        return;
+
+    if (state == GLUT_DOWN) {
+        const int index = owner->second;
+        const Panel& panel = docker.panels_[index];
+        docker.draggingPanel_ = index;
+        docker.dragStartSize_ = panel.state == DOCK_BOTTOM
+            ? panel.dockHeight : panel.dockWidth;
+        docker.dragOriginCoordinate_ = panel.state == DOCK_BOTTOM
+            ? glutGet(GLUT_WINDOW_Y) + y
+            : glutGet(GLUT_WINDOW_X) + x;
+    } else if (state == GLUT_UP) {
+        docker.draggingPanel_ = -1;
+    }
+}
+
+void Docker::splitterMotionCb(int x, int y)
+{
+    Docker& docker = instance();
+    if (docker.draggingPanel_ < 0)
+        return;
+
+    const int pointerX = glutGet(GLUT_WINDOW_X) + x;
+    const int pointerY = glutGet(GLUT_WINDOW_Y) + y;
+    docker.resizeDockedPanel(docker.draggingPanel_, pointerX, pointerY);
 }

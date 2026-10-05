@@ -1,4 +1,6 @@
 #include "../Docker/Window.hpp"
+#include "../Docker/Template/WindowTemplate.hpp"
+#include "../Help Menu/About.hpp"
 #include "Aquila-Panel.hpp"
 
 #include <string>
@@ -43,14 +45,17 @@ int main(int argc, char** argv)
     glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_RGB | GLUT_DOUBLE);
     glutInitWindowSize(900, 600);
-    int mainWindow = glutCreateWindow("Aquila GLUI");
+    const std::string windowTitle = applicationWindowTitle();
+    int mainWindow = glutCreateWindow(windowTitle.c_str());
 
     glutDisplayFunc(display);
 
     Docker& docker = Docker::instance();
     docker.init(mainWindow, onViewport);
 
-    int aquilaPanel = docker.addPanel("Aquila", buildAquilaPanel);
+    int aquilaPanel = docker.addPanel("Aquila", buildAquilaPanel, true,
+        DockerTemplate::addWindowControls);
+    int aboutPanel = docker.addPanel("About", buildAboutPanel, false);
 
     int toolsMenu = docker.addMenu("Tools");
     docker.addMenuItem(toolsMenu, "Aquila", [&docker, aquilaPanel]() {
@@ -58,8 +63,8 @@ int main(int argc, char** argv)
     });
 
     int helpMenu = docker.addMenu("Help");
-    docker.addMenuItem(helpMenu, "About", [&docker]() {
-        docker.setStatus("Docking demo built with GLUI.");
+    docker.addMenuItem(helpMenu, "About", [&docker, aboutPanel]() {
+        docker.openPanel(aboutPanel, Docker::FLOATING);
     });
 
     // Pre-docked on startup, not just available from the Tools menu.

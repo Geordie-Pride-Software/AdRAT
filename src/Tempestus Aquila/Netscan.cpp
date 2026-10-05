@@ -62,16 +62,34 @@ struct EchoResult {
 // ---------------------------------------------------------------- helpers
 
 static uint32_t parseIp(const char* s) {
-    in_addr a{};
-    if (inet_pton(AF_INET, s, &a) != 1) return 0;
-    return ntohl(a.s_addr);
+    uint32_t address = 0;
+    unsigned octet = 0;
+    int parts = 0;
+    bool hasDigit = false;
+
+    for (const char* p = s; ; ++p) {
+        if (*p >= '0' && *p <= '9') {
+            octet = octet * 10 + static_cast<unsigned>(*p - '0');
+            if (octet > 255)
+                return 0;
+            hasDigit = true;
+        } else if (*p == '.' && hasDigit && parts < 3) {
+            address = (address << 8) | octet;
+            octet = 0;
+            hasDigit = false;
+            ++parts;
+        } else if (*p == '\0' && hasDigit && parts == 3) {
+            return (address << 8) | octet;
+        } else {
+            return 0;
+        }
+    }
 }
 
 static std::string ipStr(uint32_t h) {
-    in_addr a{};
-    a.s_addr = htonl(h);
     char buf[16];
-    inet_ntop(AF_INET, &a, buf, sizeof buf);
+    std::snprintf(buf, sizeof buf, "%u.%u.%u.%u",
+        (h >> 24) & 0xff, (h >> 16) & 0xff, (h >> 8) & 0xff, h & 0xff);
     return buf;
 }
 
@@ -469,6 +487,50 @@ static std::string labelOf(const Host& h) {
     return ipStr(h.ip) + (h.name.empty() ? std::string() : " (" + h.name + ")");
 }
 
+static std::string mermaidLabel(const std::string& text) {
+    std::string escaped;
+    for (char ch : text) {
+        if (ch == '&') escaped += "&amp;";
+        else if (ch == '"') escaped += "&quot;";
+        else if (ch == '<') escaped += "&lt;";
+        else if (ch == '>') escaped += "&gt;";
+        else if (ch != '\r' && ch != '\n') escaped += ch;
+    }
+    return escaped;
+}
+
+static void writeMermaidNode(std::ostream& output, const RouterNode& node,
+    int parentId, int& nextId) {
+    const int routerId = nextId++;
+    const std::string routerLabel = "Router " + labelOf(node.router) +
+        " | " + node.network;
+    output << "  n" << routerId << "[\"" << mermaidLabel(routerLabel) << "\"]\n";
+    if (parentId >= 0)
+        output << "  n" << parentId << " --> n" << routerId << "\n";
+
+    for (const Host& device : node.devices) {
+        const int deviceId = nextId++;
+        const std::string deviceLabel = "Device " + labelOf(device) +
+            " | " + (device.role.empty() ? "device" : device.role);
+        output << "  n" << deviceId << "[\"" << mermaidLabel(deviceLabel) << "\"]\n";
+        output << "  n" << routerId << " --> n" << deviceId << "\n";
+    }
+
+    for (const RouterNode& child : node.children)
+        writeMermaidNode(output, child, routerId, nextId);
+}
+
+static bool writeMermaid(const RouterNode& root, const fs::path& path) {
+    std::ofstream output(path);
+    if (!output)
+        return false;
+
+    output << "flowchart LR\n";
+    int nextId = 0;
+    writeMermaidNode(output, root, -1, nextId);
+    return static_cast<bool>(output);
+}
+
 static std::string detailsOf(const Host& h, const std::string& network) {
     std::string s;
     s += "IP:       " + ipStr(h.ip) + "\n";
@@ -517,6 +579,11 @@ static bool exportTree(const RouterNode& root, const fs::path& base) {
         writeText(marker, "Made by ADRAT netscan. This folder is replaced on every run.\n");
         SetFileAttributesA(marker.string().c_str(), FILE_ATTRIBUTE_HIDDEN);
         writeNode(root, base / safeName("Router " + labelOf(root.router)));
+        if (!writeMermaid(root, base / "network.mmd")) {
+            std::fprintf(stderr, "Could not write Mermaid output to %s.\n",
+                         (base / "network.mmd").string().c_str());
+            return false;
+        }
         return true;
     } catch (const fs::filesystem_error& e) {
         std::fprintf(stderr, "Could not write the folder tree: %s\n", e.what());
@@ -524,21 +591,26 @@ static bool exportTree(const RouterNode& root, const fs::path& base) {
     }
 }
 
-int main(int argc, char** argv) {
+bool runNetworkScan(const fs::path& outputDirectory) {
     WSADATA wsa;
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
         std::fprintf(stderr, "WSAStartup failed.\n");
-        return 1;
+        return false;
     }
 
+    bool succeeded = false;
     RouterNode root;
     if (scan(root)) {
         printTree(root, 0);
-        fs::path out = argc > 1 ? fs::path(argv[1]) : fs::path("adrat_network");
-        if (exportTree(root, out))
-            std::printf("\nFile hierarchy written to %s\n", fs::absolute(out).string().c_str());
+        if (exportTree(root, outputDirectory)) {
+            std::printf("\nFile hierarchy written to %s\n",
+                        fs::absolute(outputDirectory).string().c_str());
+            std::printf("Mermaid diagram written to %s\n",
+                        fs::absolute(outputDirectory / "network.mmd").string().c_str());
+            succeeded = true;
+        }
     }
 
     WSACleanup();
-    return 0;
+    return succeeded;
 }

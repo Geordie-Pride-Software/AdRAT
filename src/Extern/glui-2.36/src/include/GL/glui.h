@@ -660,6 +660,8 @@ protected:
     buffer_mode_t buffer_mode; ///< Current drawing mode
     int           curr_cursor;
     int           w, h;
+    int           subwindow_width_override;
+    int           subwindow_height_override;
     long          flags; 
     bool          closing;
     int           parent_window;
@@ -746,6 +748,8 @@ public:
     
     void         close_internal();
     void         check_subwindow_position();
+    void         set_subwindow_width(int width);
+    void         set_subwindow_height(int height);
     void         set_ortho_projection();
     void         set_viewport();
     int          get_glut_window_id( void ) { return glut_window_id; } /* JVK */

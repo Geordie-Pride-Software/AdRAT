@@ -1027,6 +1027,40 @@ void      GLUI_Main::pack_controls( void )
 
   this->w = main_panel->w;
   this->h = main_panel->h;
+  if (subwindow_width_override > 0)
+    main_panel->w = this->w = subwindow_width_override;
+  if (subwindow_height_override > 0)
+    main_panel->h = this->h = subwindow_height_override;
+}
+
+void GLUI_Main::set_subwindow_width(int width)
+{
+  if (NOT TEST_AND(flags, GLUI_SUBWINDOW) OR width < 1)
+    return;
+
+  subwindow_width_override = width;
+  const int previous_window = glutGetWindow();
+  glutSetWindow(glut_window_id);
+  pack_controls();
+  glutReshapeWindow(w, h);
+  check_subwindow_position();
+  if (previous_window > 0)
+    glutSetWindow(previous_window);
+}
+
+void GLUI_Main::set_subwindow_height(int height)
+{
+  if (NOT TEST_AND(flags, GLUI_SUBWINDOW) OR height < 1)
+    return;
+
+  subwindow_height_override = height;
+  const int previous_window = glutGetWindow();
+  glutSetWindow(glut_window_id);
+  pack_controls();
+  glutReshapeWindow(w, h);
+  check_subwindow_position();
+  if (previous_window > 0)
+    glutSetWindow(previous_window);
 }
 
 
@@ -1123,6 +1157,8 @@ GLUI_Main::GLUI_Main( void )
   mouse_button_down       = false;
   w                       = 0;
   h                       = 0;
+  subwindow_width_override = 0;
+  subwindow_height_override = 0;
   active_control          = NULL;
   mouse_over_control      = NULL;
   main_gfx_window_id      = -1;

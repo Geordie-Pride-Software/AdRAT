@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
 #include <string>
 #include <utility>
 #include <vector>
@@ -34,3 +35,5 @@ struct TraceResult {
     bool reached = false;
     uint32_t publicHop = 0;
 };
+
+bool runNetworkScan(const std::filesystem::path& outputDirectory);

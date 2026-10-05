@@ -20,6 +20,7 @@ public:
     // Builds the controls of a panel. 'body' is the titled GLUI panel that
     // the controls should be added to.
     using ContentFn = std::function<void(GLUI* glui, GLUI_Panel* body)>;
+    using WindowTemplateFn = void (*)(GLUI*, int, DockState, bool, GLUI_Update_CB);
 
     // Called whenever the area left over for rendering changes.
     using ViewportFn = std::function<void(int x, int y, int w, int h)>;
@@ -33,7 +34,8 @@ public:
     void init(int mainWindow, ViewportFn onViewport);
 
     // Registers a content panel. Returns its index, used with openPanel.
-    int  addPanel(const std::string& title, ContentFn content);
+    int  addPanel(const std::string& title, ContentFn content, bool dockable = true,
+        WindowTemplateFn windowTemplate = nullptr);
 
     // Opens a panel. 'where' defaults to floating; pass DOCK_LEFT/RIGHT/
     // BOTTOM to have it appear already docked.
@@ -55,7 +57,12 @@ private:
     struct Panel {
         std::string title;
         ContentFn   content;
+        WindowTemplateFn windowTemplate = nullptr;
+        bool        dockable   = true;
         GLUI*       glui       = nullptr;
+        int         splitterWindow = 0;
+        int         dockWidth = 0;
+        int         dockHeight = 0;
         DockState   state      = CLOSED;
         DockState   pending    = CLOSED;
         bool        hasPending = false;
@@ -78,6 +85,10 @@ private:
     void applyPending();
     void relayout();
     void handleReshape();
+    void createSplitter(int index);
+    void destroySplitter(Panel& panel);
+    void updateSplitters();
+    void resizeDockedPanel(int index, int pointerX, int pointerY);
 
     // Runs 'onClose' when the GLUT window with id 'glutWinId' is closed via
     // its native close button, instead of letting GLUT's default behaviour
@@ -89,6 +100,9 @@ private:
     static void timerCb(int);
     static void reshapeCb(int w, int h);
     static void windowCloseCb();
+    static void splitterDisplayCb();
+    static void splitterMouseCb(int button, int state, int x, int y);
+    static void splitterMotionCb(int x, int y);
 
     std::vector<Panel> panels_;
     std::vector<Menu>  menus_;
@@ -97,4 +111,8 @@ private:
 
     int   mainWindow_ = 0;
     std::map<int, std::function<void()>> closeHandlers_;
+    std::map<int, int> splitterPanels_;
+    int draggingPanel_ = -1;
+    int dragOriginCoordinate_ = 0;
+    int dragStartSize_ = 0;
 };
