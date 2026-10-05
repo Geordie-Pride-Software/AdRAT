@@ -1,5 +1,5 @@
-#include "Docker/Window.hpp"
-#include "Tempestus Aquila/Aquila-Panel.hpp"
+#include "../Docker/Window.hpp"
+#include "Aquila-Panel.hpp"
 
 #include <string>
 
@@ -21,7 +21,6 @@ static void display()
     glClearColor(0.12f, 0.12f, 0.14f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    // Placeholder scene area
     glColor3f(0.2f, 0.35f, 0.6f);
     glBegin(GL_QUADS);
     glVertex2i(20, 20);
@@ -44,7 +43,7 @@ int main(int argc, char** argv)
     glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_RGB | GLUT_DOUBLE);
     glutInitWindowSize(900, 600);
-    int mainWindow = glutCreateWindow("GLUI docking demo");
+    int mainWindow = glutCreateWindow("Aquila GLUI");
 
     glutDisplayFunc(display);
 
@@ -54,14 +53,17 @@ int main(int argc, char** argv)
     int aquilaPanel = docker.addPanel("Aquila", buildAquilaPanel);
 
     int toolsMenu = docker.addMenu("Tools");
-    docker.addMenuItem(toolsMenu, "TA", [&docker, aquilaPanel]() {
-        docker.openPanel(aquilaPanel, Docker::FLOATING);
+    docker.addMenuItem(toolsMenu, "Aquila", [&docker, aquilaPanel]() {
+        docker.openPanel(aquilaPanel, Docker::DOCK_LEFT);
     });
 
     int helpMenu = docker.addMenu("Help");
     docker.addMenuItem(helpMenu, "About", [&docker]() {
         docker.setStatus("Docking demo built with GLUI.");
     });
+
+    // Pre-docked on startup, not just available from the Tools menu.
+    docker.openPanel(aquilaPanel, Docker::DOCK_LEFT);
 
     glutMainLoop();
     return 0;

@@ -1,0 +1,1 @@
+g++ -std=c++17 -IExtern/glui-2.36/src/include Main.cpp Docker/Window.cpp "Tempestus Aquila/Aquila-Panel.cpp" Extern/glui-2.36/src/*.cpp -o AdRAT.exe -lfreeglut -lglu32 -lopengl32 -lgdi32 -luser32 -ldwmapi

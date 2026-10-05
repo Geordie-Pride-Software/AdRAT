@@ -1,0 +1,5 @@
+IP:       192.168.68.1
+MAC:      6c:4c:bc:bc:5a:dd
+Hostname: unknown
+Role:     top router, your gateway
+Network:  192.168.68.0/22

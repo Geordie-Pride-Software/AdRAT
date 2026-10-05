@@ -1,0 +1,3 @@
+[submodule "src/Extern/catmd"]
+	path = src/Extern/catmd
+	url = https://github.com/Verano-20/catmd.git
